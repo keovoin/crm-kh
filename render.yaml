@@ -1,0 +1,105 @@
+# Render Blueprint — Twenty CRM
+# Deploy with: https://render.com/deploy?repo=<your-repo-url>
+#
+# This defines all services needed to run Twenty CRM on Render:
+#   - Web server (NestJS + React frontend)
+#   - Background worker (BullMQ job processor)
+#   - PostgreSQL database
+#   - Redis cache/queue
+#
+# After deployment, create the first admin user at: https://<your-server-url>
+
+services:
+  # ─── Web Server (API + Frontend) ───────────────────────────────────────────
+  - type: web
+    name: twenty-server
+    runtime: docker
+    plan: starter # minimum 1GB RAM recommended; upgrade to "standard" for production
+    dockerfilePath: packages/twenty-docker/twenty/Dockerfile
+    dockerContext: .
+    dockerTarget: twenty # builds server + frontend
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_PORT
+        value: "3000"
+      - key: SERVER_URL
+        sync: false # set this to your Render service URL, e.g. https://twenty-server-xxxx.onrender.com
+      - key: PG_DATABASE_URL
+        fromDatabase:
+          name: twenty-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: twenty-redis
+          type: redis
+          property: connectionString
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: APP_SECRET
+        generateValue: true
+      - key: STORAGE_TYPE
+        value: local
+      - key: DISABLE_DB_MIGRATIONS
+        value: "false"
+      - key: DISABLE_CRON_JOBS_REGISTRATION
+        value: "false"
+    disk:
+      name: twenty-local-storage
+      mountPath: /app/packages/twenty-server/.local-storage
+      sizeGB: 1
+
+  # ─── Background Worker (BullMQ) ────────────────────────────────────────────
+  - type: worker
+    name: twenty-worker
+    runtime: docker
+    plan: starter
+    dockerfilePath: packages/twenty-docker/twenty/Dockerfile
+    dockerContext: .
+    dockerTarget: twenty-server # worker doesn't need frontend assets
+    dockerCommand: node dist/queue-worker/queue-worker
+    envVars:
+      - key: SERVER_URL
+        sync: false # same value as twenty-server SERVER_URL
+      - key: PG_DATABASE_URL
+        fromDatabase:
+          name: twenty-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: twenty-redis
+          type: redis
+          property: connectionString
+      - key: ENCRYPTION_KEY
+        fromService:
+          name: twenty-server
+          type: web
+          envVarKey: ENCRYPTION_KEY
+      - key: APP_SECRET
+        fromService:
+          name: twenty-server
+          type: web
+          envVarKey: APP_SECRET
+      - key: STORAGE_TYPE
+        value: local
+      - key: DISABLE_DB_MIGRATIONS
+        value: "true"
+      - key: DISABLE_CRON_JOBS_REGISTRATION
+        value: "true"
+    disk:
+      name: twenty-worker-storage
+      mountPath: /app/packages/twenty-server/.local-storage
+      sizeGB: 1
+
+databases:
+  # ─── PostgreSQL 16 ─────────────────────────────────────────────────────────
+  - name: twenty-db
+    plan: starter # 1GB RAM, 1 CPU; upgrade for production
+    databaseName: twenty
+    user: twenty
+    postgresMajorVersion: "16"
+
+  # ─── Redis ─────────────────────────────────────────────────────────────────
+  - name: twenty-redis
+    plan: starter # 25MB; upgrade to "standard" for heavier workloads
+    maxmemoryPolicy: noeviction # required by Twenty for BullMQ
+    ipAllowList: [] # only allow internal access
