@@ -1,0 +1,56 @@
+# Gitpod configuration for Twenty CRM
+# Open in Gitpod: https://gitpod.io/#https://github.com/keovoin/crm-kh
+
+image:
+  file: .gitpod.Dockerfile
+
+tasks:
+  - name: Start Infrastructure (Postgres + Redis)
+    init: |
+      docker compose -f packages/twenty-docker/docker-compose.dev.yml up -d
+    command: |
+      docker compose -f packages/twenty-docker/docker-compose.dev.yml up
+
+  - name: Install Dependencies
+    init: |
+      yarn install
+    command: |
+      echo "Dependencies installed. Waiting for DB..."
+      gp await-port 5432
+      gp await-port 6379
+      echo "Infrastructure ready!"
+
+  - name: Start Twenty Server
+    command: |
+      gp await-port 5432
+      gp await-port 6379
+      sleep 3
+      npx nx run twenty-server:database:init
+      npx nx start twenty-server
+
+  - name: Start Twenty Frontend
+    command: |
+      gp await-port 3000
+      npx nx start twenty-front
+
+ports:
+  - port: 5432
+    onOpen: ignore
+    visibility: private
+  - port: 6379
+    onOpen: ignore
+    visibility: private
+  - port: 3000
+    onOpen: ignore
+    visibility: private
+    name: Twenty API
+  - port: 3001
+    onOpen: open-browser
+    visibility: public
+    name: Twenty Frontend
+
+vscode:
+  extensions:
+    - dbaeumer.vscode-eslint
+    - esbenp.prettier-vscode
+    - nrwl.angular-console
